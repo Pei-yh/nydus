@@ -24,6 +24,7 @@ import (
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/checker"
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/converter"
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/converter/provider"
+	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/loader"
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/metrics"
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/metrics/file_exporter"
 	"github.com/dragonflyoss/image-service/contrib/nydusify/pkg/remote"
@@ -331,6 +332,36 @@ func main() {
 				}
 
 				return checker.Check(context.Background())
+			},
+		},
+		{
+			Name:  "load",
+			Usage: "Load nydus image chunk to db for deduplicate rate expriment",
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "source", Required: false, Usage: "Source image reference", EnvVars: []string{"SOURCE"}},
+				&cli.BoolFlag{Name: "source-insecure", Required: false, Usage: "Allow http/insecure source registry communication", EnvVars: []string{"SOURCE_INSECURE"}},
+				&cli.StringFlag{Name: "work-dir", Value: "./output", Usage: "Work directory path for image check, will be cleaned before checking", EnvVars: []string{"WORK_DIR"}},
+				&cli.StringFlag{Name: "nydus-image", Value: "nydus-image", Usage: "The nydus-image binary path, if unset, search in PATH environment", EnvVars: []string{"NYDUS_IMAGE"}},
+				&cli.StringFlag{Name: "platform", Value: "linux/" + runtime.GOARCH, Usage: "Let nydusify choose image of specified platform from manifest index. Possible value is `amd64` or `arm64`"},
+			},
+			Action: func(c *cli.Context) error {
+				_, arch, err := provider.ExtractOsArch(c.String("platform"))
+				if err != nil {
+					return err
+				}
+
+				loader, err := loader.New(loader.Opt{
+					WorkDir:        c.String("work-dir"),
+					Source:         c.String("source"),
+					SourceInsecure: c.Bool("source-insecure"),
+					NydusImagePath: c.String("nydus-image"),
+					ExpectedArch:   arch,
+				})
+				if err != nil {
+					return err
+				}
+
+				return loader.Load(context.Background())
 			},
 		},
 	}

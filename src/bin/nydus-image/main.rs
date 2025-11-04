@@ -14,6 +14,7 @@ mod trace;
 mod builder;
 mod core;
 mod inspect;
+mod loader;
 mod validator;
 
 #[macro_use]
@@ -49,6 +50,7 @@ use crate::core::prefetch::Prefetch;
 use crate::core::tree;
 
 use crate::core::chunk_dict::import_chunk_dict;
+use loader::Loader;
 use nydus_app::{setup_logging, BuildTimeInfo};
 use nydus_utils::digest;
 use rafs::RafsIoReader;
@@ -275,6 +277,31 @@ fn main() -> Result<()> {
                     Arg::with_name("blob-dir").help("A directory holding all layers related to a single image")
                         .long("blob-dir").required(false)
                         .takes_value(true)
+                )
+        )
+                .subcommand(
+            SubCommand::with_name("load")
+                .about("load image chunk to db by bootstrap")
+                .arg(
+                    Arg::with_name("bootstrap")
+                        .long("bootstrap")
+                        .help("bootstrap file path (required)")
+                        .required(true)
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("blobs")
+                        .long("blobs")
+                        .help("blobs path (required)")
+                        .required(true)
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("dbpath")
+                        .long("dbpath")
+                        .help("the path of db (SQlite)")
+                        .required(true)
+                        .takes_value(true),
                 )
         )
         .arg(
@@ -506,9 +533,6 @@ fn main() -> Result<()> {
         let blob_ids = validator
             .check(true)
             .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
-
-        info!("bootstrap is valid, blobs: {:?}", blob_ids);
-
         ResultOutput::dump(matches, &build_info, blob_ids)?;
     }
 
@@ -530,6 +554,17 @@ fn main() -> Result<()> {
         } else {
             inspect::Prompt::run(inspector);
         }
+    }
+
+    if let Some(matches) = cmd.subcommand_matches("load") {
+        let bootstrap_path = Path::new(matches.value_of("bootstrap").unwrap());
+        let db_path = Path::new(matches.value_of("dbpath").unwrap());
+        let blobs_path = Path::new(matches.value_of("blobs").unwrap());
+        let mut loader = Loader::new(bootstrap_path, db_path)?;
+        let blob_ids = loader
+            .load(true, blobs_path)
+            .with_context(|| format!("failed to check bootstrap {:?}", bootstrap_path))?;
+        println!("bootstrap is valid, blobs: {:?}", blob_ids);
     }
 
     Ok(())

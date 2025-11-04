@@ -19,6 +19,7 @@ path = "src/lib.rs"
 
 
 [dependencies]
+rusqlite = { version = "0.24.0", features = ["bundled"] }
 rlimit = "0.3.0"
 log = "0.4.8"
 epoll = ">=4.0.1"
