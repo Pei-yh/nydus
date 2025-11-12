@@ -20,6 +20,7 @@ type Opt struct {
 	WorkDir        string
 	Source         string
 	SourceInsecure bool
+	Dbpath         string
 	NydusImagePath string
 	ExpectedArch   string
 }
@@ -70,13 +71,12 @@ func (loader *Loader) Load(ctx context.Context) error {
 
 	BootstrapPath := filepath.Join(loader.WorkDir, "bootstrap")
 	blobsPath := filepath.Join(loader.WorkDir, "blobs")
-	DbPath := filepath.Join("./", "chunk.db")
 
 	builder := NewBuilder(loader.NydusImagePath)
 	if err := builder.Load(BuilderOption{
 		BootstrapPath: BootstrapPath,
 		blobsPath:     blobsPath,
-		DbPath:        DbPath,
+		DbPath:        loader.Dbpath,
 	}); err != nil {
 		return errors.Wrap(err, "invalid nydus bootstrap format")
 	}

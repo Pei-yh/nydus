@@ -19,6 +19,7 @@ path = "src/lib.rs"
 
 
 [dependencies]
+fastcdc = "1.0.8"
 rusqlite = { version = "0.24.0", features = ["bundled"] }
 rlimit = "0.3.0"
 log = "0.4.8"

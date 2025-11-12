@@ -1,5 +1,6 @@
 use crate::tree::Tree;
 use anyhow::{Context, Result};
+use fastcdc::FastCDC;
 use nydus_utils::digest::{Algorithm as DigestAlgorithm, RafsDigest};
 use rafs::metadata::{RafsMode, RafsSuper};
 use rafs::RafsIoReader;
@@ -11,6 +12,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use storage::compress::{self, Algorithm as CompressAlgorithm};
 use storage::device::RafsChunkFlags;
+use storage::utils::digest_check;
 
 pub struct Loader {
     db_path: PathBuf,
@@ -64,7 +66,6 @@ impl Loader {
                         compress_size: chunk.compress_size,
                         decompress_size: chunk.decompress_size,
                         compress_offset: chunk.compress_offset,
-                        decompress_offset: chunk.decompress_offset,
                         is_compress: chunk.flags.contains(RafsChunkFlags::COMPRESSED),
                         flag,
                     };
@@ -102,14 +103,13 @@ struct DedupDB {
 }
 
 struct Chunk {
-    pub block_id: RafsDigest,
-    pub blob_index: u32,
-    pub compress_size: u32,
-    pub decompress_size: u32,
-    pub compress_offset: u64,
-    pub decompress_offset: u64,
-    pub is_compress: bool,
-    pub flag: u32,
+    block_id: RafsDigest,
+    blob_index: u32,
+    compress_size: u32,
+    decompress_size: u32,
+    compress_offset: u64,
+    is_compress: bool,
+    flag: u32,
 }
 
 impl DedupDB {
@@ -124,6 +124,21 @@ impl DedupDB {
         // crate table for chunk level deduplication
         for size in &[4, 16, 64, 256, 1024] {
             let chunk_table = format!("chunk_{}kb", size);
+            let chunk_sql = format!(
+                "CREATE TABLE IF NOT EXISTS {} (
+                    hash TEXT PRIMARY KEY,
+                    size INT,
+                    count INT,
+                    flag INT
+                )",
+                chunk_table
+            );
+            conn.execute(&chunk_sql, &[] as &[&dyn rusqlite::ToSql])?;
+        }
+
+        // crate table for cdc chunk level deduplication
+        for size in &[4, 16, 64, 256] {
+            let chunk_table = format!("chunk_{}kb_cdc", size);
             let chunk_sql = format!(
                 "CREATE TABLE IF NOT EXISTS {} (
                     hash TEXT PRIMARY KEY,
@@ -162,6 +177,10 @@ impl DedupDB {
         let mut chunks_64k = Vec::new();
         let mut chunks_256k = Vec::new();
         let mut chunks_1024k = Vec::new();
+        let mut chunks_4k_cdc = Vec::new();
+        let mut chunks_16k_cdc = Vec::new();
+        let mut chunks_64k_cdc = Vec::new();
+        let mut chunks_256k_cdc = Vec::new();
 
         let mut blob_files = Vec::with_capacity(blob_ids.len());
         for blob_id in blob_ids {
@@ -188,8 +207,8 @@ impl DedupDB {
                 ));
             }
 
+            // read chunk data from data and check chunk hash
             let file = &mut blob_files[blob_index];
-
             file.seek(SeekFrom::Start(chunk.compress_offset))
                 .with_context(|| {
                     format!(
@@ -197,7 +216,6 @@ impl DedupDB {
                         chunk.compress_offset, blob_index
                     )
                 })?;
-
             let mut raw_data = vec![0u8; chunk.compress_size as usize];
             file.read_exact(&mut raw_data).with_context(|| {
                 format!(
@@ -205,7 +223,6 @@ impl DedupDB {
                     chunk.compress_size, chunk.compress_offset, blob_index
                 )
             })?;
-
             let chunk_data = if chunk.is_compress {
                 let mut buf = vec![0u8; chunk.decompress_size as usize];
                 compress::decompress(&raw_data, None, &mut buf, self.compress).map_err(|e| {
@@ -216,12 +233,24 @@ impl DedupDB {
             } else {
                 raw_data
             };
+            if !digest_check(&chunk_data, &chunk.block_id, self.digest) {
+                return Err(anyhow::anyhow!(
+                    "Digest check failed for chunk {}",
+                    chunk.block_id
+                ));
+            }
 
+            // collect chunk
             chunks_4k.extend(self.split_chunk(&chunk_data, 4, chunk.flag, blob_id)?);
             chunks_16k.extend(self.split_chunk(&chunk_data, 16, chunk.flag, blob_id)?);
             chunks_64k.extend(self.split_chunk(&chunk_data, 64, chunk.flag, blob_id)?);
             chunks_256k.extend(self.split_chunk(&chunk_data, 256, chunk.flag, blob_id)?);
             chunks_1024k.extend(self.split_chunk(&chunk_data, 1024, chunk.flag, blob_id)?);
+
+            chunks_4k_cdc.extend(self.split_chunk_cdc(&chunk_data, 4, chunk.flag, blob_id)?);
+            chunks_16k_cdc.extend(self.split_chunk_cdc(&chunk_data, 16, chunk.flag, blob_id)?);
+            chunks_64k_cdc.extend(self.split_chunk_cdc(&chunk_data, 64, chunk.flag, blob_id)?);
+            chunks_256k_cdc.extend(self.split_chunk_cdc(&chunk_data, 256, chunk.flag, blob_id)?);
         }
 
         self.insert_chunk("chunk_4kb", &chunks_4k)?;
@@ -229,6 +258,11 @@ impl DedupDB {
         self.insert_chunk("chunk_64kb", &chunks_64k)?;
         self.insert_chunk("chunk_256kb", &chunks_256k)?;
         self.insert_chunk("chunk_1024kb", &chunks_1024k)?;
+
+        self.insert_chunk("chunk_4kb_cdc", &chunks_4k_cdc)?;
+        self.insert_chunk("chunk_16kb_cdc", &chunks_16k_cdc)?;
+        self.insert_chunk("chunk_64kb_cdc", &chunks_64k_cdc)?;
+        self.insert_chunk("chunk_256kb_cdc", &chunks_256k_cdc)?;
         Ok(())
     }
 
@@ -251,6 +285,29 @@ impl DedupDB {
             offset += granule_size;
         }
 
+        Ok(chunks)
+    }
+
+    fn split_chunk_cdc<'a>(
+        &self,
+        chunk_data: &[u8],
+        avg_granule_kb: usize, // 4, 16, 64, 256
+        flag: u32,
+        blob_id: &'a str,
+    ) -> Result<Vec<(String, u32, &'a str, u32)>> {
+        let avg_size = avg_granule_kb * 1024;
+        let min_size = avg_size / 2;
+        let max_size = avg_size * 2;
+        let chunker = FastCDC::new(chunk_data, min_size, avg_size, max_size);
+        let mut chunks = Vec::new();
+        for entry in chunker {
+            let start = entry.offset as usize;
+            let end = start + entry.length as usize;
+            let sub_chunk = &chunk_data[start..end];
+            let chunk_hash = RafsDigest::from_buf(sub_chunk, self.digest).to_string();
+            let chunk_size = sub_chunk.len() as u32;
+            chunks.push((chunk_hash, chunk_size, blob_id, flag));
+        }
         Ok(chunks)
     }
 
@@ -286,7 +343,7 @@ impl DedupDB {
         Ok(())
     }
 
-    pub fn insert_blobs(&mut self, blob_ids: &[String]) -> Result<()> {
+    fn insert_blobs(&mut self, blob_ids: &[String]) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
             let insert_sql = "INSERT OR IGNORE INTO blob (hash) VALUES (?1)";

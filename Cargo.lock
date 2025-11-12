@@ -413,6 +413,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
+name = "fastcdc"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3f1596230ad22715a97a82deba0403ece9e4a458d008fd2511518d72a115bef"
+
+[[package]]
 name = "flate2"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1196,6 +1202,7 @@ dependencies = [
  "env_logger",
  "epoll",
  "event-manager",
+ "fastcdc",
  "flexi_logger",
  "fuse-rs",
  "hyper",

@@ -341,6 +341,7 @@ func main() {
 				&cli.StringFlag{Name: "source", Required: false, Usage: "Source image reference", EnvVars: []string{"SOURCE"}},
 				&cli.BoolFlag{Name: "source-insecure", Required: false, Usage: "Allow http/insecure source registry communication", EnvVars: []string{"SOURCE_INSECURE"}},
 				&cli.StringFlag{Name: "work-dir", Value: "./output", Usage: "Work directory path for image check, will be cleaned before checking", EnvVars: []string{"WORK_DIR"}},
+				&cli.StringFlag{Name: "dbpath", Value: "./chunk.db", Usage: "collect nydus image chunk into db", EnvVars: []string{"DBPATH"}},
 				&cli.StringFlag{Name: "nydus-image", Value: "nydus-image", Usage: "The nydus-image binary path, if unset, search in PATH environment", EnvVars: []string{"NYDUS_IMAGE"}},
 				&cli.StringFlag{Name: "platform", Value: "linux/" + runtime.GOARCH, Usage: "Let nydusify choose image of specified platform from manifest index. Possible value is `amd64` or `arm64`"},
 			},
@@ -354,6 +355,7 @@ func main() {
 					WorkDir:        c.String("work-dir"),
 					Source:         c.String("source"),
 					SourceInsecure: c.Bool("source-insecure"),
+					Dbpath:         c.String("dbpath"),
 					NydusImagePath: c.String("nydus-image"),
 					ExpectedArch:   arch,
 				})
