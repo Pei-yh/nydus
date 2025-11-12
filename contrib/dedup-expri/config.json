@@ -1,0 +1,5 @@
+{
+  "workDir": "/home/peipei/test",
+  "imagesPath": "./images",
+  "registry": "localhost:5000"
+}

@@ -1,4 +1,4 @@
-package builder
+package context
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type Builder struct {
+type builder struct {
 }
 
 type bucket struct {
@@ -26,6 +26,10 @@ var chunkTables = []string{
 	"chunk_64kb",
 	"chunk_256kb",
 	"chunk_1024kb",
+	"chunk_4kb_cdc",
+	"chunk_16kb_cdc",
+	"chunk_64kb_cdc",
+	"chunk_256kb_cdc",
 }
 
 var buckets = []bucket{
@@ -42,7 +46,7 @@ var buckets = []bucket{
 // 较大的size（大于等于1MB）带来多少重复率贡献，贡献在尺寸上的贡献
 // 小于1M的实际就是文件级别去重，要怎么将其利用上
 // 文件的重复是否有其他的规律，是否集中
-func (c *Builder) CalcInode(db *sql.DB, File *os.File) error {
+func (c *builder) CalcInode(db *sql.DB, File *os.File) error {
 	writer := bufio.NewWriter(File)
 	_, _ = writer.WriteString(fmt.Sprintf("==== big inode rate Report: %s ====\n", time.Now().Format(time.RFC3339)))
 
@@ -89,7 +93,7 @@ func (c *Builder) CalcInode(db *sql.DB, File *os.File) error {
 }
 
 // 统计大小分布
-func (c *Builder) CalcSizeDistribution(db *sql.DB, File *os.File) error {
+func (c *builder) CalcSizeDistribution(db *sql.DB, File *os.File) error {
 	writer := bufio.NewWriter(File)
 	_, _ = writer.WriteString(fmt.Sprintf("==== Size Distribution Report: %s ====\n", time.Now().Format(time.RFC3339)))
 
@@ -121,7 +125,7 @@ func (c *Builder) CalcSizeDistribution(db *sql.DB, File *os.File) error {
 }
 
 // 统计重复数据分布
-func (c *Builder) CalcDupSizeDistribution(db *sql.DB, File *os.File) error {
+func (c *builder) CalcDupSizeDistribution(db *sql.DB, File *os.File) error {
 	writer := bufio.NewWriter(File)
 	_, _ = writer.WriteString(fmt.Sprintf("==== Dup Size Distribution Report: %s ====\n", time.Now().Format(time.RFC3339)))
 
@@ -152,7 +156,7 @@ func (c *Builder) CalcDupSizeDistribution(db *sql.DB, File *os.File) error {
 }
 
 // 统计数量分布
-func (c *Builder) CalcCountDistribution(db *sql.DB, File *os.File) error {
+func (c *builder) CalcCountDistribution(db *sql.DB, File *os.File) error {
 	writer := bufio.NewWriter(File)
 	_, _ = writer.WriteString(fmt.Sprintf("==== Count Distribution Report: %s ====\n", time.Now().Format(time.RFC3339)))
 
@@ -184,7 +188,7 @@ func (c *Builder) CalcCountDistribution(db *sql.DB, File *os.File) error {
 }
 
 // 统计不同分块粒度的去重率
-func (c *Builder) CalcDeduplication(db *sql.DB, File *os.File) error {
+func (c *builder) CalcDeduplication(db *sql.DB, File *os.File) error {
 	writer := bufio.NewWriter(File)
 	_, _ = writer.WriteString(fmt.Sprintf("==== Deduplication rate Report: %s ====\n", time.Now().Format(time.RFC3339)))
 
@@ -217,7 +221,7 @@ func (c *Builder) CalcDeduplication(db *sql.DB, File *os.File) error {
 	return writer.Flush()
 }
 
-func (c *Builder) CalcTotalSize(db *sql.DB) (int64, error) {
+func (c *builder) CalcTotalSize(db *sql.DB) (int64, error) {
 	var total int64
 	query := fmt.Sprintf("SELECT SUM(size * count) FROM %s", "chunk_1024kb")
 	err := db.QueryRow(query).Scan(&total)
