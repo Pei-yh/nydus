@@ -14,9 +14,6 @@ import (
 	"time"
 )
 
-var MAXSIZE int64 = 1024 * 1024 * 1024 * 1024
-var count int64 = 1
-
 type Config struct {
 	WorkDir    string `json:"workDir"`
 	ImagesPath string `json:"imagesPath"`
@@ -121,9 +118,7 @@ func calcAll(db *sql.DB, workdir string) error {
 }
 
 func (c *Context) processImages(images []string) error {
-	workdir := fmt.Sprintf("%s/%d", c.resultdir, count)
-	_ = os.Mkdir(workdir, 0755)
-	logPath := filepath.Join(workdir, "load.log")
+	logPath := filepath.Join(c.resultdir, "load.log")
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
@@ -136,7 +131,6 @@ func (c *Context) processImages(images []string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer db.Close()
-	build := builder{}
 
 	for _, source := range images {
 		var logLine string
@@ -162,15 +156,8 @@ func (c *Context) processImages(images []string) error {
 			}
 		}
 		_, _ = writer.WriteString(logLine)
-
-		if size, err := build.CalcTotalSize(db); err != nil || size >= MAXSIZE {
-			calcAll(db, workdir)
-			count++
-			return writer.Flush()
-		}
 	}
-	calcAll(db, workdir)
-	count++
+	calcAll(db, c.resultdir)
 	return writer.Flush()
 }
 
@@ -207,21 +194,21 @@ func get_images(dir string) ([]string, error) {
 
 func (c *Context) Process() error {
 	_ = os.RemoveAll(c.resultdir)
-	_ = os.Mkdir(c.resultdir, 0755)
+	_ = os.MkdirAll(c.resultdir, 0755)
+
 	images, err := get_images(c.imagespath)
 	if err != nil {
 		return fmt.Errorf("failed to load get image list from path : %w", err)
 	}
 
-	for i := 0; i < 10; i++ {
-		_ = os.Remove(c.dbpath)
-		rand.Seed(time.Now().UnixNano())
-		rand.Shuffle(len(images), func(i, j int) {
-			images[i], images[j] = images[j], images[i]
-		})
-		if err := c.processImages(images); err != nil {
-			return fmt.Errorf("failed to load images: %w", err)
-		}
+	_ = os.Remove(c.dbpath)
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(images), func(i, j int) {
+		images[i], images[j] = images[j], images[i]
+	})
+	if err := c.processImages(images); err != nil {
+		return fmt.Errorf("failed to load images: %w", err)
 	}
+
 	return nil
 }
