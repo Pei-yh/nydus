@@ -10,6 +10,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use storage::compress::{self, Algorithm as CompressAlgorithm};
 use storage::device::RafsChunkFlags;
 use storage::utils::digest_check;
@@ -99,7 +100,7 @@ impl Loader {
 struct DedupDB {
     compress: CompressAlgorithm,
     digest: DigestAlgorithm,
-    conn: Connection,
+    conn: Arc<Mutex<Connection>>,
 }
 
 struct Chunk {
@@ -119,7 +120,14 @@ impl DedupDB {
         digest: DigestAlgorithm,
     ) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        conn.execute("PRAGMA temp_store = MEMORY", params![])?;
+
+        conn.execute_batch(
+            "
+            PRAGMA synchronous = NORMAL;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA cache_size = 20000;
+        ",
+        )?;
 
         // crate table for chunk level deduplication
         for size in &[4, 16, 64, 256, 1024] {
@@ -162,7 +170,7 @@ impl DedupDB {
         Ok(DedupDB {
             compress,
             digest,
-            conn,
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
@@ -316,26 +324,27 @@ impl DedupDB {
         table_name: &str,
         chunks: &[(String, u32, &str, u32)],
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
         {
-            let mut blob_exists_sql = tx.prepare("SELECT 1 FROM blob WHERE hash = ?1")?;
-            let update_sql = format!(
+            let mut exists_sql = tx.prepare("SELECT 1 FROM blob WHERE hash = ?1")?;
+            let mut update_sql = tx.prepare(&format!(
                 "UPDATE {} SET count = count + 1 WHERE hash = ?1",
                 table_name
-            );
-            let insert_sql = format!(
+            ))?;
+            let mut insert_sql = tx.prepare(&format!(
                 "INSERT INTO {} (hash, size, count, flag) VALUES (?1, ?2, 1, ?3)",
                 table_name
-            );
+            ))?;
 
             for (chunk_hash, chunk_size, blob_id, flag) in chunks {
-                let blob_exists = blob_exists_sql.exists(params![*blob_id])?;
+                let blob_exists = exists_sql.exists(params![*blob_id])?;
                 if blob_exists {
                     continue;
                 }
-                let updated = tx.execute(&update_sql, params![chunk_hash])?;
+                let updated = update_sql.execute(params![chunk_hash])?;
                 if updated == 0 {
-                    tx.execute(&insert_sql, params![chunk_hash, *chunk_size as i64, flag])?;
+                    insert_sql.execute(params![chunk_hash, *chunk_size as i64, flag])?;
                 }
             }
         }
@@ -344,11 +353,12 @@ impl DedupDB {
     }
 
     fn insert_blobs(&mut self, blob_ids: &[String]) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
         {
-            let insert_sql = "INSERT OR IGNORE INTO blob (hash) VALUES (?1)";
+            let mut insert_sql = tx.prepare("INSERT OR IGNORE INTO blob (hash) VALUES (?1)")?;
             for blob_id in blob_ids {
-                tx.execute(insert_sql, params![blob_id])?;
+                insert_sql.execute(params![blob_id])?;
             }
         }
         tx.commit()?;

@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type Config struct {
@@ -193,7 +191,8 @@ func get_images(dir string) ([]string, error) {
 }
 
 func (c *Context) Process() error {
-	_ = os.RemoveAll(c.resultdir)
+	_ = os.RemoveAll(c.workdir)
+	_ = os.MkdirAll(c.workdir, 0755)
 	_ = os.MkdirAll(c.resultdir, 0755)
 
 	images, err := get_images(c.imagespath)
@@ -201,11 +200,6 @@ func (c *Context) Process() error {
 		return fmt.Errorf("failed to load get image list from path : %w", err)
 	}
 
-	_ = os.Remove(c.dbpath)
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(images), func(i, j int) {
-		images[i], images[j] = images[j], images[i]
-	})
 	if err := c.processImages(images); err != nil {
 		return fmt.Errorf("failed to load images: %w", err)
 	}
