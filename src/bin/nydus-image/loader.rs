@@ -123,9 +123,7 @@ impl DedupDB {
 
         conn.execute_batch(
             "
-            PRAGMA synchronous = NORMAL;
-            PRAGMA temp_store = MEMORY;
-            PRAGMA cache_size = 20000;
+            PRAGMA journal_mode = WAL;
         ",
         )?;
 

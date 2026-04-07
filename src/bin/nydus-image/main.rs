@@ -279,7 +279,7 @@ fn main() -> Result<()> {
                         .takes_value(true)
                 )
         )
-                .subcommand(
+        .subcommand(
             SubCommand::with_name("load")
                 .about("load image chunk to db by bootstrap")
                 .arg(
