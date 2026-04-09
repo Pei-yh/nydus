@@ -43,6 +43,10 @@ use std::mem::size_of;
 use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 
+use lazy_static::lazy_static;
+use rusqlite::{params, Connection, NO_PARAMS};
+use std::sync::Mutex;
+
 use nydus_utils::digest::{self, DigestHasher, RafsDigest};
 use nydus_utils::ByteSize;
 use storage::compress;
@@ -1068,6 +1072,33 @@ impl RafsStore for RafsV5XAttrs {
     }
 }
 
+lazy_static! {
+    static ref DB_CONN: Mutex<Connection> = {
+        let conn = Connection::open("/tmp/nydus_first_access.db").expect("Failed to open DB");
+
+        // Use WAL to speed up frequent inserts from chunk access logging.
+        let _ = conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA wal_autocheckpoint = 1000;",
+        );
+
+        let _ = conn.execute("DROP TABLE IF EXISTS access_log1", NO_PARAMS);
+
+        let _ = conn.execute(
+            "CREATE TABLE IF NOT EXISTS access_log1 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash TEXT,
+                size INT,
+                blobId TEXT
+            )",
+            NO_PARAMS,
+        );
+
+        Mutex::new(conn)
+    };
+}
+
 pub(crate) fn rafsv5_alloc_bio_desc<I: RafsInode + RafsV5InodeOps>(
     inode: &I,
     offset: u64,
@@ -1101,6 +1132,22 @@ pub(crate) fn rafsv5_alloc_bio_desc<I: RafsInode + RafsV5InodeOps>(
     for idx in index_start..index_end {
         let chunk = inode.get_chunk_info(idx)?;
         let blob = inode.get_blob_by_index(chunk.blob_index())?;
+        if let Ok(conn) = DB_CONN.lock() {
+            let res = conn.execute(
+                "INSERT INTO access_log1 (hash, size, blobId)
+                    VALUES(?1, ?2, ?3)",
+                params![
+                    chunk.block_id().to_string(),
+                    chunk.decompress_size(),
+                    blob.blob_id
+                ],
+            );
+            if let Err(e) = res {
+                eprintln!("DB Insert Error: {}", e);
+            }
+        } else {
+            eprintln!("DB connection lock poisoned");
+        }
         if !add_chunk_to_bio_desc(offset, end, chunk, &mut desc, blksize as u32, blob, user_io) {
             break;
         }

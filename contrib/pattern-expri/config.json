@@ -1,0 +1,17 @@
+[
+    {
+        "workDir": "./dbfile"
+    },
+    {
+        "image": "59.77.8.68:80/fio/pytorch:2.10.0-cuda12.8-cudnn9-runtime_nydus",
+        "args": ["python", "-c", "import torch"]
+    },
+    {
+        "image": "59.77.8.68:80/fio/ubuntu:24.10_nydus",
+        "args": ["bash", "-lc", "echo hello from ubuntu"]
+    },
+    {
+        "image": "59.77.8.68:80/fio/golang:1.26_nydus",
+        "args": ["go", "version"]
+    }
+]

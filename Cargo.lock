@@ -1449,6 +1449,7 @@ dependencies = [
  "nix",
  "nydus-error 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nydus-utils",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_with",
